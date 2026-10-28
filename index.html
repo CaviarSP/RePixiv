@@ -26,6 +26,17 @@
 <div id="thumbs" aria-label="图片缩略图"></div><p class="hint">使用 ← → 切换图片 · 手机可左右滑动</p>
 </section>
 <section id="errorPanel" hidden><h2 id="errorTitle">无法打开图片集</h2><p id="errorText"></p><button id="errorRetry">重新加载</button></section>
-</main><footer><span>RePixiv</span><span id="mode">安全图片查看器</span></footer>
+</main>
+<div id="lightbox" hidden role="dialog" aria-modal="true" aria-label="图片大图">
+  <div id="lightboxStage">
+    <img id="lightboxImage" alt="" hidden>
+    <div id="lightboxLoading" hidden>正在获取并解密图片…</div>
+    <div id="lightboxError" hidden></div>
+  </div>
+  <button id="lightboxClose" type="button" aria-label="关闭">×</button>
+  <button id="lightboxPrev" type="button" aria-label="上一张">‹</button>
+  <button id="lightboxNext" type="button" aria-label="下一张">›</button>
+  <div id="lightboxMeta"><span id="lightboxName"></span><span id="lightboxCounter"></span></div>
+</div><footer><span>RePixiv</span><span id="mode">安全图片查看器</span></footer>
 <script src="./app.js"></script>
 </body></html>

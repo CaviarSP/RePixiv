@@ -19,7 +19,10 @@ const ui = {
   thumbs:$("thumbs"), prev:$("prev"), next:$("next"), errorPanel:$("errorPanel"),
   errorTitle:$("errorTitle"), errorText:$("errorText"), errorRetry:$("errorRetry"), mode:$("mode"),
   register:$("register"), registerForm:$("registerForm"), registerPassword:$("registerPassword"),
-  registerSubmit:$("registerSubmit"), registerMsg:$("registerMsg")
+  registerSubmit:$("registerSubmit"), registerMsg:$("registerMsg"),
+  lightbox:$("lightbox"), lightboxStage:$("lightboxStage"), lightboxImage:$("lightboxImage"), lightboxLoading:$("lightboxLoading"),
+  lightboxError:$("lightboxError"), lightboxName:$("lightboxName"), lightboxCounter:$("lightboxCounter"),
+  lightboxClose:$("lightboxClose"), lightboxPrev:$("lightboxPrev"), lightboxNext:$("lightboxNext")
 };
 const demo = {
   title:"演示图片集", description:"前端演示模式。接入 Worker 后会显示你的图片集。",
@@ -31,7 +34,7 @@ const demo = {
     {id:"d5",name:"群山之间",demoUrl:"https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=max&w=1600&q=80"}
   ]
 };
-let key=null, sessionToken="", registerToken="", authJustStored=false, gallery=null, index=0, urls=new Map(), loadingIds=new Set(), touchX=null;
+let key=null, sessionToken="", registerToken="", authJustStored=false, gallery=null, index=0, urls=new Map(), loadingIds=new Set(), touchX=null, swipeGuardUntil=0, lightboxOpen=false, lightboxBusy=false, lightboxTouchX=null;
 
 function status(s){ui.status.textContent=s}
 function show(el){el.hidden=false} function hide(el){el.hidden=true}
@@ -137,6 +140,7 @@ function setThumb(i,url){const b=ui.thumbs.children[i];if(!b)return;const img=b.
 function update(){
   ui.counter.textContent=`${index+1} / ${gallery.images.length}`;ui.imageName.textContent=gallery.images[index].name||`图片 ${index+1}`;
   ui.prev.disabled=ui.next.disabled=gallery.images.length<2;
+  if(ui.lightboxPrev)ui.lightboxPrev.disabled=ui.lightboxNext.disabled=gallery.images.length<2;
   [...ui.thumbs.children].forEach((b,i)=>{b.classList.toggle("active",i===index);if(i===index)b.scrollIntoView({behavior:"smooth",block:"nearest",inline:"nearest"})});
 }
 async function imageUrl(i){
@@ -161,6 +165,48 @@ async function select(i){
     if(ui.main.complete&&ui.main.naturalWidth){hide(ui.loading);show(ui.main)}
     ui.openImage.href=u;show(ui.openImage);setThumb(index,u);
   }catch(e){hide(ui.loading);show(ui.imageError);ui.imageError.textContent=e.message||"图片加载失败。"}
+}
+function openLightbox(){
+  if(!ui.lightbox||lightboxOpen||!gallery?.images.length)return;
+  if(Date.now()<swipeGuardUntil)return;
+  lightboxOpen=true;lightboxTouchX=null;
+  show(ui.lightbox);document.body.classList.add("lightbox-open");
+  hide(ui.lightboxImage);hide(ui.lightboxError);show(ui.lightboxLoading);
+  showLightbox(index);
+}
+function closeLightbox(){
+  if(!lightboxOpen)return;
+  lightboxOpen=false;lightboxTouchX=null;
+  if(ui.lightbox)hide(ui.lightbox);
+  document.body.classList.remove("lightbox-open");
+}
+async function showLightbox(i){
+  if(!lightboxOpen||!gallery?.images.length)return;
+  index=(i+gallery.images.length)%gallery.images.length;
+  update();
+  hide(ui.lightboxImage);hide(ui.lightboxError);show(ui.lightboxLoading);
+  ui.lightboxName.textContent=gallery.images[index].name||`图片 ${index+1}`;
+  ui.lightboxCounter.textContent=`${index+1} / ${gallery.images.length}`;
+  try{
+    const u=await imageUrl(index);
+    if(!lightboxOpen)return;
+    ui.lightboxImage.onload=()=>{hide(ui.lightboxLoading);hide(ui.lightboxError);show(ui.lightboxImage)};
+    ui.lightboxImage.onerror=()=>{hide(ui.lightboxLoading);hide(ui.lightboxImage);show(ui.lightboxError);ui.lightboxError.textContent="图片已解密，但浏览器无法显示该格式。"};
+    ui.lightboxImage.src=u;ui.lightboxImage.alt=gallery.images[index].name||`图片 ${index+1}`;
+    if(ui.lightboxImage.complete&&ui.lightboxImage.naturalWidth){hide(ui.lightboxLoading);show(ui.lightboxImage)}
+    ui.openImage.href=u;setThumb(index,u);
+  }catch(e){
+    hide(ui.lightboxLoading);show(ui.lightboxError);ui.lightboxError.textContent=e.message||"图片加载失败。";
+  }
+}
+async function lightboxMove(d){
+  if(!lightboxOpen||lightboxBusy||!gallery?.images.length)return;
+  lightboxBusy=true;
+  try{
+    const n=(index+d+gallery.images.length)%gallery.images.length;
+    await select(n);
+    if(lightboxOpen)await showLightbox(n);
+  }finally{lightboxBusy=false}
 }
 function showRegister(token){
   if(!ui.register){fatal("登记页组件未加载，请刷新页面后重试。");return}
@@ -208,9 +254,22 @@ async function boot(){
 ui.prev.addEventListener("click",()=>move(-1));ui.next.addEventListener("click",()=>move(1));
 ui.retry.addEventListener("click",boot);ui.errorRetry.addEventListener("click",boot);
 if(ui.registerForm)ui.registerForm.addEventListener("submit",submitRegister);
-document.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")move(-1);if(e.key==="ArrowRight")move(1)});
+ui.main.addEventListener("click",openLightbox);
+if(ui.lightbox){
+  ui.lightboxClose.addEventListener("click",closeLightbox);
+  ui.lightboxPrev.addEventListener("click",()=>lightboxMove(-1));
+  ui.lightboxNext.addEventListener("click",()=>lightboxMove(1));
+  ui.lightbox.addEventListener("click",e=>{if(e.target===ui.lightbox||e.target===ui.lightboxStage)closeLightbox()});
+  ui.lightbox.addEventListener("touchstart",e=>{lightboxTouchX=e.changedTouches[0]?.clientX??null},{passive:true});
+  ui.lightbox.addEventListener("touchend",e=>{if(lightboxTouchX===null)return;const d=e.changedTouches[0].clientX-lightboxTouchX;lightboxTouchX=null;if(Math.abs(d)>45)lightboxMove(d<0?1:-1)},{passive:true});
+}
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&lightboxOpen){closeLightbox();return}
+  if(e.key==="ArrowLeft")lightboxOpen?lightboxMove(-1):move(-1);
+  if(e.key==="ArrowRight")lightboxOpen?lightboxMove(1):move(1);
+});
 ui.stage.addEventListener("touchstart",e=>{touchX=e.changedTouches[0]?.clientX??null},{passive:true});
-ui.stage.addEventListener("touchend",e=>{if(touchX===null)return;const d=e.changedTouches[0].clientX-touchX;if(Math.abs(d)>45)move(d<0?1:-1);touchX=null},{passive:true});
+ui.stage.addEventListener("touchend",e=>{if(touchX===null)return;const d=e.changedTouches[0].clientX-touchX;if(Math.abs(d)>45){move(d<0?1:-1);swipeGuardUntil=Date.now()+400}touchX=null},{passive:true});
 addEventListener("pagehide",cleanup);
 if(CONFIG.DEMO_MODE){status("演示模式");welcome("演示模式已开启。接入 Worker 后关闭演示模式即可加载私有图片集。")}
 boot();
