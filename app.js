@@ -17,7 +17,9 @@ const ui = {
   stage:$("stage"), placeholder:$("placeholder"), main:$("mainImage"), loading:$("loading"),
   imageError:$("imageError"), imageName:$("imageName"), openImage:$("openImage"),
   thumbs:$("thumbs"), prev:$("prev"), next:$("next"), errorPanel:$("errorPanel"),
-  errorTitle:$("errorTitle"), errorText:$("errorText"), errorRetry:$("errorRetry"), mode:$("mode")
+  errorTitle:$("errorTitle"), errorText:$("errorText"), errorRetry:$("errorRetry"), mode:$("mode"),
+  register:$("register"), registerForm:$("registerForm"), registerPassword:$("registerPassword"),
+  registerSubmit:$("registerSubmit"), registerMsg:$("registerMsg")
 };
 const demo = {
   title:"演示图片集", description:"前端演示模式。接入 Worker 后会显示你的图片集。",
@@ -29,7 +31,7 @@ const demo = {
     {id:"d5",name:"群山之间",demoUrl:"https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=max&w=1600&q=80"}
   ]
 };
-let key=null, sessionToken="", authJustStored=false, gallery=null, index=0, urls=new Map(), loadingIds=new Set(), touchX=null;
+let key=null, sessionToken="", registerToken="", authJustStored=false, gallery=null, index=0, urls=new Map(), loadingIds=new Set(), touchX=null;
 
 function status(s){ui.status.textContent=s}
 function show(el){el.hidden=false} function hide(el){el.hidden=true}
@@ -45,6 +47,15 @@ function takeSessionToken(){
   const rest=params.toString();
   history.replaceState(null,"",location.pathname+location.search+(rest?"#"+rest:""));
   authJustStored=true;
+  return incoming;
+}
+function takeRegisterToken(){
+  const params=new URLSearchParams(location.hash.slice(1));
+  const incoming=(params.get("t")||"").trim();
+  if(!incoming)return "";
+  params.delete("t");
+  const rest=params.toString();
+  history.replaceState(null,"",location.pathname+location.search+(rest?"#"+rest:""));
   return incoming;
 }
 function readKey(){
@@ -143,16 +154,49 @@ async function select(i){
   if(!gallery?.images.length)return;index=(i+gallery.images.length)%gallery.images.length;update();
   hide(ui.main);hide(ui.placeholder);hide(ui.imageError);show(ui.loading);ui.loading.textContent="正在获取并解密图片…";hide(ui.openImage);
   try{
-    const u=await imageUrl(index);ui.main.onload=()=>hide(ui.loading);ui.main.onerror=()=>{hide(ui.loading);show(ui.imageError);ui.imageError.textContent="图片已解密，但浏览器无法显示该格式。"};
-    ui.main.src=u;ui.main.alt=gallery.images[index].name||`图片 ${index+1}`;if(ui.main.complete&&ui.main.naturalWidth)hide(ui.loading);
+    const u=await imageUrl(index);
+    ui.main.onload=()=>{hide(ui.loading);hide(ui.imageError);show(ui.main)};
+    ui.main.onerror=()=>{hide(ui.loading);hide(ui.main);show(ui.imageError);ui.imageError.textContent="图片已解密，但浏览器无法显示该格式。"};
+    ui.main.src=u;ui.main.alt=gallery.images[index].name||`图片 ${index+1}`;
+    if(ui.main.complete&&ui.main.naturalWidth){hide(ui.loading);show(ui.main)}
     ui.openImage.href=u;show(ui.openImage);setThumb(index,u);
   }catch(e){hide(ui.loading);show(ui.imageError);ui.imageError.textContent=e.message||"图片加载失败。"}
+}
+function showRegister(token){
+  if(!ui.register){fatal("登记页组件未加载，请刷新页面后重试。");return}
+  registerToken=token;
+  hide(ui.welcome);hide(ui.gallery);hide(ui.errorPanel);show(ui.register);
+  ui.registerMsg.textContent="";ui.registerMsg.className="";
+  ui.registerPassword.disabled=false;ui.registerSubmit.disabled=false;ui.registerPassword.value="";
+  status("等待登记");ui.registerPassword.focus();
+}
+async function submitRegister(event){
+  event.preventDefault();
+  if(!registerToken||ui.registerSubmit.disabled)return;
+  const password=ui.registerPassword.value;
+  if(!password){ui.registerMsg.textContent="请输入 QQ 消息中的登记密码。";return}
+  ui.registerSubmit.disabled=true;ui.registerMsg.className="";ui.registerMsg.textContent="正在登记…";
+  try{
+    const data=await post("/api/register",{t:registerToken,password});
+    const token=String(data&&data.token||"");
+    if(!AUTH_RE.test(token))throw Error("登记成功，但未收到有效会话，请回到 QQ 重试。");
+    sessionToken=token;safeSet(AUTH_KEY,token);registerToken="";hide(ui.register);
+    if(key){await loadGallery()}
+    else{welcome("登记成功！请回到 QQ，点击【查看失败图片】按钮。");status("已登记")}
+  }catch(e){
+    ui.registerSubmit.disabled=false;ui.registerMsg.textContent=e.message||"登记失败，请稍后再试";
+  }
 }
 function move(d){if(gallery?.images.length)select(index+d)}
 async function boot(){
   try{
     sessionToken=takeSessionToken();
+    const incomingRegister=takeRegisterToken();
     key=readKey();
+    if(incomingRegister){
+      if(!AUTH_RE.test(incomingRegister)){fatal("登记链接无效或已过期，请回到 QQ 重新点击【登记】。");return}
+      showRegister(incomingRegister);return;
+    }
     if(!CONFIG.DEMO_MODE&&!key){
       if(authJustStored){welcome("登记成功！请回到 QQ，点击【查看失败图片】按钮。");status("已登记")}
       else{welcome("链接中没有找到密钥，请确认 QQ 消息中的链接完整。");status("缺少密钥")}
@@ -163,6 +207,7 @@ async function boot(){
 }
 ui.prev.addEventListener("click",()=>move(-1));ui.next.addEventListener("click",()=>move(1));
 ui.retry.addEventListener("click",boot);ui.errorRetry.addEventListener("click",boot);
+if(ui.registerForm)ui.registerForm.addEventListener("submit",submitRegister);
 document.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")move(-1);if(e.key==="ArrowRight")move(1)});
 ui.stage.addEventListener("touchstart",e=>{touchX=e.changedTouches[0]?.clientX??null},{passive:true});
 ui.stage.addEventListener("touchend",e=>{if(touchX===null)return;const d=e.changedTouches[0].clientX-touchX;if(Math.abs(d)>45)move(d<0?1:-1);touchX=null},{passive:true});

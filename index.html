@@ -9,6 +9,16 @@
 <header><a class="brand" href="./"><span>R</span> RePixiv</a><div id="status">正在初始化…</div></header>
 <main>
 <section id="welcome"><div class="eyebrow">PRIVATE GALLERY</div><h1>你的图片集，随时查看。</h1><p id="welcomeText">正在读取链接…</p><button id="retry" hidden>重试</button></section>
+<section id="register" hidden>
+<div class="eyebrow">REGISTRATION</div><h1>登记当前浏览器</h1>
+<p>输入 QQ 消息中的密码，登记后即可查看补发的图片。登记链接只能使用一次。</p>
+<form id="registerForm" autocomplete="off">
+<label for="registerPassword">登记密码</label>
+<input id="registerPassword" name="password" type="password" inputmode="text" autocomplete="current-password" required maxlength="200" placeholder="请输入 QQ 消息中的密码">
+<button id="registerSubmit" type="submit">完成登记</button>
+</form>
+<p id="registerMsg" role="status" aria-live="polite"></p>
+</section>
 <section id="gallery" hidden>
 <div class="heading"><div><div class="eyebrow">GALLERY</div><h1 id="title">图片集</h1><p id="description"></p></div><span id="counter">0 / 0</span></div>
 <div class="viewer"><button id="prev" aria-label="上一张">‹</button><div id="stage"><div id="placeholder">图片将在这里显示</div><img id="mainImage" alt="" hidden><div id="loading" hidden>正在获取并解密图片…</div><div id="imageError" hidden></div></div><button id="next" aria-label="下一张">›</button></div>

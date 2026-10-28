@@ -14,15 +14,17 @@ GitHub Pages 即可。
 
 首次使用需要先登记。QQ 里的【登记】按钮会打开：
 
-`https://img.caviarsp.top/register#t=<一次性令牌>`
+`https://caviarsp.github.io/RePixiv/#t=<一次性令牌>`
 
-输入密码并登记成功后，Worker 重定向到：
-
-`https://caviarsp.github.io/RePixiv/#auth=<Bearer token>`
-
-前端把 token 存入 `localStorage["repixiv.session"]`，之后请求 Worker
+登记表单就在本前端里（`#register`）：输入密码后前端直接 POST
+`/api/register`，把返回的 Bearer token 存入
+`localStorage["repixiv.session"]`，不需要跳到其他域名。之后请求 Worker
 时带 `Authorization: Bearer <token>`。同一个 `caviarsp.github.io` 下
 所有 Pages 共享这个键，其他 Pages 不要读取它。
+
+登记与看图使用同一个页面和同一个浏览器存储，这是 QQ 内置浏览器能直接
+完成整条流程的关键；Worker 自带的 `/register` 页仍保留，但设置了
+`frame-ancestors 'none'`，在 QQ 里可能被要求用外部浏览器打开。
 
 ## Worker API 契约
 
