@@ -1,40 +1,46 @@
-# RePixiv 前端
+# RePixiv GitHub Pages 前端
 
-适用于现有仓库 `https://caviarsp.github.io/RePixiv/`。包含响应式画廊、触摸滑动、方向键切换、缩略图导航和演示画廊。
+包含 `index.html`、`style.css`、`app.js`。可直接上传到 GitHub Pages 仓库根目录。默认演示模式可用于检查页面和交互；正式接入后端需修改 `app.js` 顶部的 `API_BASE` 并设置 `DEMO_MODE: false`。
 
-## 部署
-把 `index.html`、`style.css`、`app.js` 上传到 GitHub 仓库 `RePixiv` 的 Pages 发布目录。如果 Pages 使用 `main / (root)`，就放在仓库根目录。提交后等待 Pages 自动发布。
+## QQ 链接格式
 
-先打开：
-`https://caviarsp.github.io/RePixiv/?gallery=demo`
+建议使用 URL 片段，避免密钥随页面请求发送给静态站点：
 
-## 接入 Cloudflare Worker
-编辑 `app.js` 顶部的 CONFIG：
-```js
-const CONFIG = {
-  API_BASE: "https://你的-worker-域名",
-  DEMO_MODE: false
-};
-```
+`https://caviarsp.github.io/RePixiv/#key=YOUR_KEY`
 
-后端约定：
-- `GET /api/gallery/{galleryId}` 返回 JSON：
+代码也兼容 `?key=YOUR_KEY`。片段不会自动发送给 GitHub Pages，但前端会通过 HTTPS POST 把密钥发送给 Worker。请使用至少 32 字节密码学安全随机密钥的 Base64URL 表示，不要使用短密码。
+
+## Worker API 契约
+
+### POST `/api/gallery`
+请求 JSON：`{"key":"YOUR_KEY"}`
+
+响应 JSON 示例：
 ```json
 {
-  "id":"abc123",
-  "title":"画廊标题",
-  "description":"3 张图片",
-  "images":[
-    {"id":"img001","name":"001.jpg","thumbnailUrl":"/api/thumb/img001"},
-    {"id":"img002","name":"002.jpg","thumbnailUrl":"/api/thumb/img002"}
+  "title": "我的图片集",
+  "description": "说明",
+  "images": [
+    {"id":"image-001","name":"图片 1","mimeType":"image/jpeg"},
+    {"id":"image-002","name":"图片 2","mimeType":"image/png"}
   ]
 }
 ```
-- `GET /api/image/{imageId}` 返回图片二进制，且设置正确的 `Content-Type: image/jpeg`（或其他 `image/*` 类型）。401/403 表示未授权。
-- 缩略图接口可选；没有 `thumbnailUrl` 时会显示编号占位缩略图。
+Worker 用 key 查询 Python 后端的 `key -> image URL list` 映射，但只向前端返回图片 ID、名称、MIME 类型，不返回原始 URL。
 
-前端使用 `credentials: "include"`，如使用 Cookie 会话，Worker 必须对 `https://caviarsp.github.io` 配置精确的 CORS Origin、`Access-Control-Allow-Credentials: true`，并正确响应 OPTIONS。不要使用 `Access-Control-Allow-Origin: *` 搭配凭据。
+### POST `/api/image`
+请求 JSON：`{"key":"YOUR_KEY","imageId":"image-001"}`
 
-注意：默认 GitHub Pages 域名与自定义 Worker 域名可能涉及跨站 Cookie 限制，尤其是 QQ 内置浏览器。正式启用登记机制前需在目标浏览器实测；也可考虑给 Pages 绑定自有域名以改善同站点 Cookie 方案。
+响应为二进制 `application/octet-stream`，格式：
+`RPX1`（4 ASCII 字节）+ `IV`（12 随机字节）+ `AES-GCM ciphertext || 16-byte tag`。
 
-当前版本预期 Worker 返回浏览器可显示的图片字节，尚未实现特定加密二进制协议。若要使用浏览器端解密，需要先确定协议、密钥传递和授权流程，再修改 `app.js`。不要把长期密钥、管理令牌或源站凭据写入前端；GitHub Pages 的静态文件是公开可读的。
+前端按如下规则派生 AES 密钥：`SHA-256(UTF-8(key))`，再将 32 字节摘要导入 AES-GCM。Worker 必须使用完全相同的规则。每次加密都必须使用新的随机 12 字节 IV，标签长度 128 bit。
+
+## Worker / Python 安全要求
+
+- Worker 先用 key 查询 Python 后端，确认图片集存在，再检查 `imageId` 确实属于该集合。
+- 图片 URL 由服务端可信配置决定，禁止客户端提交任意 URL；仅允许指定图片源站和路径，限制重定向、MIME、响应大小，避免 SSRF。
+- 不要在日志里记录请求体中的 key。启用 HTTPS、限速和合理的错误响应。
+- Worker CORS 精确允许前端 Origin，允许 `POST, OPTIONS` 和 `Content-Type`；不要使用通配 Origin。
+- 当前前端不使用 Cookie 会话，key 本身就是访问凭证。若要强制浏览器登记，需要额外增加会话验证。
+- 图片解密成功后，明文对浏览器可用；此方案无法阻止已获授权的浏览器环境截取明文。
