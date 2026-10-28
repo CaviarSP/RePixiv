@@ -1,28 +1,29 @@
-
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>图片查看器</title>
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: #15171c;
-      color: white;
-      font-family: sans-serif;
-    }
-    main { text-align: center; padding: 24px; }
-    p { color: #b8bec9; }
-  </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111318"><title>RePixiv · 图片画廊</title>
+<link rel="stylesheet" href="./style.css"><script src="./app.js" defer></script>
 </head>
 <body>
-  <main>
-    <h1>图片查看器</h1>
-    <p>GitHub Pages 已经正常运行。</p>
-  </main>
-</body>
-</html>
+<header class="top"><a class="brand" href="./"><b>R</b> RePixiv</a><div><button id="reload" aria-label="重新加载">↻</button><button id="info" aria-label="关于">ⓘ</button></div></header>
+<main>
+<section id="welcome" class="welcome">
+<div class="eyebrow">PRIVATE GALLERY</div><h1>你的图片，<br>专注地看。</h1>
+<p>输入画廊 ID，或打开包含 <code>?gallery=画廊ID</code> 的链接。</p>
+<form id="form"><label for="galleryId">画廊 ID</label><div class="inputrow"><input id="galleryId" placeholder="例如 abc123" maxlength="200"><button class="primary">打开画廊</button></div></form>
+<p class="note">当前为静态前端。点击下方按钮可以先测试多图浏览。</p><button id="demo" class="linkbtn">查看演示画廊 →</button>
+</section>
+<section id="viewer" class="viewer hidden">
+<div class="heading"><div><div class="eyebrow" id="eyebrow">GALLERY</div><h1 id="title">图片画廊</h1><p id="desc" class="muted"></p></div><span id="counter" class="counter">0 / 0</span></div>
+<div class="stage"><button id="prev" class="arrow left" aria-label="上一张">‹</button><div id="viewport" tabindex="0">
+<div id="loading" class="loading"><i></i> 正在加载图片…</div><img id="main" class="hidden" alt="" draggable="false">
+<div id="error" class="error hidden"><b>图片加载失败</b><p id="errorText"></p><button id="retry">重试</button></div>
+</div><button id="next" class="arrow right" aria-label="下一张">›</button><div class="stagefoot"><span id="name">—</span><button id="open">打开图片 ↗</button></div></div>
+<div class="thumbhead"><b>图片列表</b><span class="muted">左右滑动或使用方向键</span></div><div id="thumbs" class="thumbs"></div>
+<div class="foot"><button id="back">← 返回</button><span id="status" class="muted" role="status"></span></div>
+</section>
+</main>
+<footer><span>RePixiv</span><span>GitHub Pages 静态前端</span></footer>
+<dialog id="about"><form method="dialog"><button class="x">×</button></form><div class="eyebrow">ABOUT REPIXIV</div><h2>关于这个查看器</h2><p>本页面是公开的静态前端。正式使用时，图片列表和图片数据应通过 Cloudflare Worker API 获取。</p><p class="warning">不要把管理密钥、长期访问令牌或服务器凭据写入前端代码。</p><form method="dialog"><button class="primary">知道了</button></form></dialog>
+</body></html>
