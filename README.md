@@ -1,46 +1,69 @@
 # RePixiv GitHub Pages 前端
 
-包含 `index.html`、`style.css`、`app.js`。可直接上传到 GitHub Pages 仓库根目录。默认演示模式可用于检查页面和交互；正式接入后端需修改 `app.js` 顶部的 `API_BASE` 并设置 `DEMO_MODE: false`。
+包含 `index.html`、`style.css`、`app.js`，上传到 `CaviarSP/RePixiv` 的
+GitHub Pages 即可。
 
-## QQ 链接格式
+## 链接格式
 
-建议使用 URL 片段，避免密钥随页面请求发送给静态站点：
+补发按钮链接：
 
-`https://caviarsp.github.io/RePixiv/#key=YOUR_KEY`
+`https://caviarsp.github.io/RePixiv/#key=<64位十六进制密钥>`
 
-代码也兼容 `?key=YOUR_KEY`。片段不会自动发送给 GitHub Pages，但前端会通过 HTTPS POST 把密钥发送给 Worker。请使用至少 32 字节密码学安全随机密钥的 Base64URL 表示，不要使用短密码。
+密钥只放在 URL Fragment，不会随页面请求发送给 GitHub Pages。前端会
+把它通过 HTTPS POST 发给 Worker。
+
+首次使用需要先登记。QQ 里的【登记】按钮会打开：
+
+`https://img.caviarsp.top/register#t=<一次性令牌>`
+
+输入密码并登记成功后，Worker 重定向到：
+
+`https://caviarsp.github.io/RePixiv/#auth=<Bearer token>`
+
+前端把 token 存入 `localStorage["repixiv.session"]`，之后请求 Worker
+时带 `Authorization: Bearer <token>`。同一个 `caviarsp.github.io` 下
+所有 Pages 共享这个键，其他 Pages 不要读取它。
 
 ## Worker API 契约
 
 ### POST `/api/gallery`
-请求 JSON：`{"key":"YOUR_KEY"}`
 
-响应 JSON 示例：
+请求：`{"key":"<64位hex>"}`
+
+响应：
+
 ```json
 {
-  "title": "我的图片集",
-  "description": "说明",
+  "title": "发送失败的图片",
+  "description": "共 2 张图片",
+  "expiresAt": 1760604800,
   "images": [
-    {"id":"image-001","name":"图片 1","mimeType":"image/jpeg"},
-    {"id":"image-002","name":"图片 2","mimeType":"image/png"}
+    {"id":"im_...","name":"原图 1","mimeType":"image/jpeg"}
   ]
 }
 ```
-Worker 用 key 查询 Python 后端的 `key -> image URL list` 映射，但只向前端返回图片 ID、名称、MIME 类型，不返回原始 URL。
+
+不返回原图 URL。
 
 ### POST `/api/image`
-请求 JSON：`{"key":"YOUR_KEY","imageId":"image-001"}`
 
-响应为二进制 `application/octet-stream`，格式：
-`RPX1`（4 ASCII 字节）+ `IV`（12 随机字节）+ `AES-GCM ciphertext || 16-byte tag`。
+请求：`{"key":"<64位hex>","imageId":"im_..."}`
 
-前端按如下规则派生 AES 密钥：`SHA-256(UTF-8(key))`，再将 32 字节摘要导入 AES-GCM。Worker 必须使用完全相同的规则。每次加密都必须使用新的随机 12 字节 IV，标签长度 128 bit。
+响应为二进制：
 
-## Worker / Python 安全要求
+`RPX1`（4 ASCII 字节）+ `IV`（12 字节）+ `AES-GCM ciphertext || 16 字节 tag`
 
-- Worker 先用 key 查询 Python 后端，确认图片集存在，再检查 `imageId` 确实属于该集合。
-- 图片 URL 由服务端可信配置决定，禁止客户端提交任意 URL；仅允许指定图片源站和路径，限制重定向、MIME、响应大小，避免 SSRF。
-- 不要在日志里记录请求体中的 key。启用 HTTPS、限速和合理的错误响应。
-- Worker CORS 精确允许前端 Origin，允许 `POST, OPTIONS` 和 `Content-Type`；不要使用通配 Origin。
-- 当前前端不使用 Cookie 会话，key 本身就是访问凭证。若要强制浏览器登记，需要额外增加会话验证。
-- 图片解密成功后，明文对浏览器可用；此方案无法阻止已获授权的浏览器环境截取明文。
+AES-256-GCM 的 key 是 64 位 hex 直接解码出的 32 字节原始密钥，
+**不再做 `SHA-256(key)` 派生**。每次加密使用新的随机 12 字节 IV，
+tag 长度 128 bit。
+
+## 安全要点
+
+- 两个 `/api` 接口都需要 Bearer 会话；Cookie（`__Host-rp_session`）
+  只作为兼容路径。
+- Worker 只抓取 bot 字典里的 `https://pillusts.caviarsp.top` 地址，
+  不接受客户端 URL / path。
+- 响应不包含原图 URL；前端只拿到密文和展示元数据。
+- 明文在浏览器解密后仍然可被已授权用户截取，这一点无法仅靠前端避免。
+- 若把前端部署到 GitHub Pages 自定义域，必须同步修改 Worker 的
+  `ALLOWED_ORIGINS`。

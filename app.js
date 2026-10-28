@@ -1,12 +1,15 @@
 (() => {
 "use strict";
 
-/* 先部署 Worker，再把 API_BASE 改为 Worker 的 HTTPS 地址，并关闭 DEMO_MODE。 */
+/* 部署 Worker 后把 API_BASE 改为 Worker 的 HTTPS 地址，并关闭 DEMO_MODE。 */
 const CONFIG = {
-  API_BASE: "https://api.example.com",
-  DEMO_MODE: true,
+  API_BASE: "https://img.caviarsp.top",
+  DEMO_MODE: false,
   TIMEOUT_MS: 30000
 };
+const AUTH_KEY = "repixiv.session";
+const AUTH_RE = /^[A-Za-z0-9._~-]{20,200}$/;
+const KEY_RE = /^[0-9a-f]{64}$/i;
 const $ = id => document.getElementById(id);
 const ui = {
   status:$("status"), welcome:$("welcome"), welcomeText:$("welcomeText"), retry:$("retry"),
@@ -26,31 +29,60 @@ const demo = {
     {id:"d5",name:"群山之间",demoUrl:"https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=max&w=1600&q=80"}
   ]
 };
-let key=null, gallery=null, index=0, urls=new Map(), loadingIds=new Set(), touchX=null;
+let key=null, sessionToken="", authJustStored=false, gallery=null, index=0, urls=new Map(), loadingIds=new Set(), touchX=null;
 
 function status(s){ui.status.textContent=s}
 function show(el){el.hidden=false} function hide(el){el.hidden=true}
+function safeGet(name){try{return localStorage.getItem(name)||""}catch(_){return""}}
+function safeSet(name,value){try{localStorage.setItem(name,value);return true}catch(_){return false}}
+function takeSessionToken(){
+  const params=new URLSearchParams(location.hash.slice(1));
+  const incoming=(params.get("auth")||"").trim();
+  if(!incoming)return safeGet(AUTH_KEY);
+  if(!AUTH_RE.test(incoming))return safeGet(AUTH_KEY);
+  safeSet(AUTH_KEY,incoming);
+  params.delete("auth");
+  const rest=params.toString();
+  history.replaceState(null,"",location.pathname+location.search+(rest?"#"+rest:""));
+  authJustStored=true;
+  return incoming;
+}
 function readKey(){
-  const u=new URL(location.href), hash=new URLSearchParams(location.hash.slice(1));
-  const k=hash.get("key") || u.searchParams.get("key");
+  if(new URL(location.href).searchParams.has("key"))throw Error("密钥不能放在查询参数中，请使用 QQ 消息里的完整链接。");
+  const params=new URLSearchParams(location.hash.slice(1));
+  const k=params.get("key");
   if(!k)return null;
-  if(k.length>512 || !/^[A-Za-z0-9._~-]+$/.test(k)) throw Error("链接中的密钥格式无效，请检查链接是否完整。");
-  return k;
+  if(!KEY_RE.test(k))throw Error("链接中的密钥格式无效，请检查链接是否完整。");
+  return k.toLowerCase();
+}
+function hexToBytes(hex){
+  const out=new Uint8Array(hex.length/2);
+  for(let i=0;i<out.length;i++)out[i]=parseInt(hex.slice(i*2,i*2+2),16);
+  return out;
 }
 function welcome(msg,retry=false){show(ui.welcome);hide(ui.gallery);hide(ui.errorPanel);ui.welcomeText.textContent=msg;ui.retry.hidden=!retry}
 function fatal(msg){hide(ui.welcome);hide(ui.gallery);show(ui.errorPanel);ui.errorTitle.textContent="无法打开图片集";ui.errorText.textContent=msg;status("加载失败")}
 async function request(url,opts={}){
   const c=new AbortController(), t=setTimeout(()=>c.abort(),CONFIG.TIMEOUT_MS);
   try{return await fetch(url,{...opts,signal:c.signal,cache:"no-store",redirect:"error",referrerPolicy:"no-referrer"})}
-  catch(e){if(e.name==="AbortError")throw Error("请求超时，请稍后重试。");throw e}
+  catch(e){
+    if(e.name==="AbortError")throw Error("请求超时，请稍后重试。");
+    if(e instanceof TypeError)throw Error("无法连接图片服务，请检查网络后重试。");
+    throw e;
+  }
   finally{clearTimeout(t)}
 }
 async function post(path,body,binary=false){
+  const headers={"Content-Type":"application/json","Accept":binary?"application/octet-stream":"application/json"};
+  if(sessionToken)headers.Authorization="Bearer "+sessionToken;
   const r=await request(CONFIG.API_BASE.replace(/\/+$/,"")+path,{
-    method:"POST",headers:{"Content-Type":"application/json","Accept":binary?"application/octet-stream":"application/json"},
-    credentials:"omit",body:JSON.stringify(body)
+    method:"POST",headers,credentials:"include",body:JSON.stringify(body)
   });
-  if(!r.ok){let msg="";try{const j=await r.json();msg=j.error||j.message||""}catch(_){}throw Error(msg||`服务器请求失败（HTTP ${r.status}）。`)}
+  if(!r.ok){
+    let msg="";try{const j=await r.json();msg=j.error||j.message||""}catch(_){}
+    if(r.status===401&&!msg)msg="当前浏览器未登记，请回到 QQ 点击【登记】。";
+    throw Error(msg||`服务器请求失败（HTTP ${r.status}）。`);
+  }
   return binary?r.arrayBuffer():r.json();
 }
 async function decrypt(buffer){
@@ -58,8 +90,9 @@ async function decrypt(buffer){
   if(b.length<32)throw Error("加密图片数据不完整。");
   if(String.fromCharCode(...b.slice(0,4))!=="RPX1")throw Error("图片数据格式错误：预期 RPX1。");
   const iv=b.slice(4,16), ciphertext=b.slice(16);
-  const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(key));
-  const aes=await crypto.subtle.importKey("raw",digest,{name:"AES-GCM"},false,["decrypt"]);
+  const raw=hexToBytes(key);
+  if(raw.length!==32)throw Error("密钥长度错误。");
+  const aes=await crypto.subtle.importKey("raw",raw,{name:"AES-GCM"},false,["decrypt"]);
   try{return await crypto.subtle.decrypt({name:"AES-GCM",iv,tagLength:128},aes,ciphertext)}
   catch(_){throw Error("图片解密失败：密钥或服务端加密协议不匹配。")}
 }
@@ -68,10 +101,10 @@ async function loadGallery(){
   cleanup();index=0;welcome("正在验证密钥并读取图片集…");status("正在加载");
   if(CONFIG.DEMO_MODE){gallery=demo;ui.mode.textContent="演示模式"}
   else{
-    if(!key)throw Error("链接中没有密钥。请使用 https://view.example/#key=你的密钥");
+    if(!key)throw Error("链接中没有密钥，请确认 QQ 消息中的链接完整。");
     gallery=await post("/api/gallery",{key});
     if(!gallery||!Array.isArray(gallery.images))throw Error("后端响应格式错误：缺少 images 数组。");
-    ui.mode.textContent="加密图片查看器";
+    ui.mode.textContent=sessionToken?"Bearer 会话 · 加密图片":"加密图片查看器";
   }
   if(!gallery.images.length)throw Error("这个图片集暂时没有图片。");
   render();await select(0);
@@ -116,7 +149,18 @@ async function select(i){
   }catch(e){hide(ui.loading);show(ui.imageError);ui.imageError.textContent=e.message||"图片加载失败。"}
 }
 function move(d){if(gallery?.images.length)select(index+d)}
-async function boot(){try{key=readKey();if(!CONFIG.DEMO_MODE&&!key){welcome("链接中没有找到密钥，请确认 QQ 消息中的链接完整。");status("缺少密钥");return}await loadGallery()}catch(e){fatal(e.message||"发生未知错误。")}}
+async function boot(){
+  try{
+    sessionToken=takeSessionToken();
+    key=readKey();
+    if(!CONFIG.DEMO_MODE&&!key){
+      if(authJustStored){welcome("登记成功！请回到 QQ，点击【查看失败图片】按钮。");status("已登记")}
+      else{welcome("链接中没有找到密钥，请确认 QQ 消息中的链接完整。");status("缺少密钥")}
+      return;
+    }
+    await loadGallery();
+  }catch(e){fatal(e.message||"发生未知错误。")}
+}
 ui.prev.addEventListener("click",()=>move(-1));ui.next.addEventListener("click",()=>move(1));
 ui.retry.addEventListener("click",boot);ui.errorRetry.addEventListener("click",boot);
 document.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")move(-1);if(e.key==="ArrowRight")move(1)});
